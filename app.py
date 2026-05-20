@@ -2,53 +2,48 @@
 
 import streamlit as st
 import pandas as pd
-import requests
+import subprocess
 import time
 from datetime import datetime
-
-# =========================
-# CONFIGURATION
-# =========================
-
-SMS_GATEWAY_URL = "http://192.168.1.5:8080/send"
-
-DAILY_LIMIT = 100
-
-# =========================
-# GOOGLE SHEET URL
-# =========================
-
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1FwTi33gbgjNfoJpTcDzImh87tooq4HHIG8QdYB6roRQ/edit?usp=sharing"
-
-# Convert Google Sheet URL to CSV export URL
-sheet_id = GOOGLE_SHEET_URL.split("/d/")[1].split("/")[0]
-
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
 
 # =========================
 # PAGE CONFIG
 # =========================
 
 st.set_page_config(
-    page_title="College SMS Notice System",
+    page_title="KDE SMS Notice System",
     layout="wide"
 )
 
-st.title("📩 College SMS Notice System")
+st.title("📩 KDE Connect SMS System")
+
+st.markdown("""
+This system sends SMS using your Android phone through KDE Connect.
+""")
 
 # =========================
-# LOAD GOOGLE SHEET
+# GOOGLE SHEET
+# =========================
+
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1FwTi33gbgjNfoJpTcDzImh87tooq4HHIG8QdYB6roRQ/edit?usp=sharing"
+
+sheet_id = GOOGLE_SHEET_URL.split("/d/")[1].split("/")[0]
+
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
+
+# =========================
+# LOAD DATA
 # =========================
 
 try:
 
     df = pd.read_csv(CSV_URL)
 
-    st.success("Google Sheet Connected Successfully")
+    st.success("Google Sheet Loaded Successfully")
 
 except Exception as e:
 
-    st.error("Unable to load Google Sheet")
+    st.error(f"Error loading Google Sheet: {e}")
     st.stop()
 
 # =========================
@@ -98,13 +93,13 @@ with col1:
     )
 
 with col2:
-    selected_sem = st.selectbox(
+    selected_semester = st.selectbox(
         "Select Semester",
         semesters
     )
 
 with col3:
-    selected_uni = st.selectbox(
+    selected_university = st.selectbox(
         "Select University",
         universities
     )
@@ -116,14 +111,14 @@ if selected_course != "All":
         filtered_df["course"].astype(str) == selected_course
     ]
 
-if selected_sem != "All":
+if selected_semester != "All":
     filtered_df = filtered_df[
-        filtered_df["semester"].astype(str) == selected_sem
+        filtered_df["semester"].astype(str) == selected_semester
     ]
 
-if selected_uni != "All":
+if selected_university != "All":
     filtered_df = filtered_df[
-        filtered_df["university"].astype(str) == selected_uni
+        filtered_df["university"].astype(str) == selected_university
     ]
 
 st.info(f"Selected Students: {len(filtered_df)}")
@@ -132,7 +127,7 @@ st.info(f"Selected Students: {len(filtered_df)}")
 # MESSAGE TEMPLATE
 # =========================
 
-st.subheader("✉ SMS Message")
+st.subheader("✉ SMS Template")
 
 template = st.text_area(
     "Write Message",
@@ -141,7 +136,7 @@ template = st.text_area(
 
 Important notice for {course} Semester {semester} students of {university}.
 
-Please check the college notice board.
+Please check college notice board.
 
 - Office Administration"""
 )
@@ -174,28 +169,31 @@ if len(filtered_df) > 0:
     st.code(preview)
 
 # =========================
-# SEND SMS FUNCTION
+# KDE CONNECT SMS FUNCTION
 # =========================
 
-def send_sms(phone, message):
-
-    payload = {
-        "phone": str(phone),
-        "message": message
-    }
+def send_sms_kde(phone, message):
 
     try:
 
-        response = requests.post(
-            SMS_GATEWAY_URL,
-            json=payload,
-            timeout=20
+        command = [
+            "kdeconnect-cli",
+            "--send-sms",
+            message,
+            "--destination",
+            str(phone)
+        ]
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True
         )
 
-        if response.status_code == 200:
+        if result.returncode == 0:
             return True, "Sent"
 
-        return False, response.text
+        return False, result.stderr
 
     except Exception as e:
 
@@ -211,18 +209,18 @@ if st.button("🚀 Send SMS"):
         st.warning("No students selected")
         st.stop()
 
-    logs = []
-
     progress = st.progress(0)
+
+    status_box = st.empty()
+
+    logs = []
 
     success_count = 0
     failed_count = 0
 
     total = len(filtered_df)
 
-    status_box = st.empty()
-
-    for index, row in filtered_df.iterrows():
+    for i, row in filtered_df.iterrows():
 
         try:
 
@@ -237,7 +235,7 @@ if st.button("🚀 Send SMS"):
                 f"Sending to {row['name']} ({row['phone']})"
             )
 
-            success, response = send_sms(
+            success, response = send_sms_kde(
                 row["phone"],
                 personalized_message
             )
@@ -257,7 +255,7 @@ if st.button("🚀 Send SMS"):
 
             progress.progress((len(logs)) / total)
 
-            # Delay to avoid SIM blocking
+            # Delay to avoid SIM block
             time.sleep(3)
 
         except Exception as e:
@@ -271,6 +269,10 @@ if st.button("🚀 Send SMS"):
                 "status": "Failed",
                 "response": str(e)
             })
+
+    # =========================
+    # RESULTS
+    # =========================
 
     st.success("SMS Sending Completed")
 
